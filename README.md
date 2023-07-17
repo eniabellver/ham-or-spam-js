@@ -18,7 +18,7 @@ I like ham, I definitely do not like spam. So I trained an AI to help me categor
 
 ### To-Do
 
-- Important: Fix bug where predictions all say it's ham even when label is spam, making me eat the yucky spam
+- ~~Important: Fix bug where predictions all say it's ham even when label is spam, making me eat the yucky spam~~
 - Build a frontend with a text input to provide an SMS and have the model categorise it
 - Put that frontend and our Node.js server live and help others avoid eating spam
   <br></br>

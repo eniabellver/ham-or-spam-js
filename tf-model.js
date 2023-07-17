@@ -82,11 +82,11 @@ fs.createReadStream(csvFilePath)
         for (let i = 0; i < 5; i++) {
           const text = textData[i];
           const label = labelData[i];
-          const prediction =
-            predictions.arraySync()[i][0] > 0.5 ? 'spam' : 'ham';
+          const prediction = predictions.arraySync()[i][0];
+          const category = getLabelCategory(label, prediction)
           console.log(`Text: ${text}`);
           console.log(`Label: ${label}`);
-          console.log(`Prediction: ${prediction}`);
+          console.log(`Prediction: ${category}`);
           console.log('-----------------------------');
         }
       })
@@ -95,6 +95,10 @@ fs.createReadStream(csvFilePath)
       });
   });
 
-function getLabelCategory(label) {
-  return label === '1' ? 'spam' : 'ham';
+function getLabelCategory(prediction, threshold = 0.5) {
+  if (prediction > threshold) {
+    return 'spam';
+  } else {
+    return 'ham';
+  }
 }
