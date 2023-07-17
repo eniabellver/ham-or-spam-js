@@ -1,6 +1,6 @@
 # Ham or Spam?
 
-I like ham, I definitely do not like spam. So I trained an AI to help me categorise my SMS, learning from a CSV datased that outputs 0 = ham, 1 = spam.
+I like ham, I definitely do not like spam. So I trained an AI to help me categorise my SMS, learning from a CSV dataset that outputs 0 = ham, 1 = spam.
 
 ### Tech
 
