@@ -1,7 +1,6 @@
 const tf = require('@tensorflow/tfjs-node');
 const csv = require('csv-parser');
 const fs = require('fs');
-const natural = require('natural');
 
 const csvFilePath = './files/sms_spam_dataset.csv';
 
