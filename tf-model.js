@@ -9,42 +9,93 @@ const textData = [];
 const labelData = [];
 
 fs.createReadStream(csvFilePath)
-  .pipe(csv({skipLines: 1})) //skip header line
+  .pipe(csv())
   .on('data', (row) => {
     textData.push(row.sms);
-    labelData.push(row.label);
+    labelData.push(parseInt(row.label));
   })
   .on('end', () => {
     console.log('CSV file successfully processed');
 
-    // label numeric vals: 0 = ham, 1 = spam
+    //prep data
     const numericLabelData = labelData.map((label) => parseInt(label));
+    const tokenizedTextData = textData.map((text) =>
+      text.toLowerCase().split(/\s+/)
+    );
 
-    // arrange text data
-    
+    const vocabulary = new Set();
+    tokenizedTextData.forEach((tokens) =>
+      tokens.forEach((token) => vocabulary.add(token))
+    );
+    const vocabularyArray = Array.from(vocabulary);
+    const wordIndex = {};
+    vocabularyArray.forEach((word, index) => {
+      wordIndex[word] = index;
+    });
 
-    // normalise
-    const normalizedTextData = dataset.map((text) => text.div(tf.scalar(255)));
-    const labelTensor = tf.tensor1d(numericLabelData);
+    const sequences = tokenizedTextData.map((tokens) =>
+      tokens.map((token) => wordIndex[token] || 0)
+    );
+    const maxLength = Math.max(...sequences.map((sequence) => sequence.length));
+    const paddedSequences = sequences.map((sequence) => {
+      const padding = Array(maxLength - sequence.length).fill(0);
+      return sequence.concat(padding);
+    });
 
-    // create and compile
+    // create tensors
+    const textTensor = tf.tensor2d(paddedSequences);
+    const labelTensor = tf.tensor2d(numericLabelData, [
+      numericLabelData.length,
+      1,
+    ]);
+
+    const normalizedTextTensor = textTensor.div(
+      tf.scalar(vocabularyArray.length - 1)
+    );
+
+    // compile
     const model = tf.sequential();
-    model.add(tf.layers.dense({ units: 1, inputShape: [1] }));
-    model.compile({ loss: 'meanSquaredError', optimizer: 'sgd' });
+    model.add(
+      tf.layers.embedding({
+        inputDim: vocabularyArray.length,
+        outputDim: 16,
+        inputLength: maxLength,
+      })
+    );
+    model.add(tf.layers.flatten());
+    model.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
+    model.compile({
+      loss: 'binaryCrossentropy',
+      optimizer: 'adam',
+      metrics: ['accuracy'],
+    });
 
     // train
-    normalizedTextData
-      .forEachAsync((text) => {
-        const textTensor = tf.tensor2d([text.dataSync()], [1, 1]);
-        return model.fit(textTensor, labelTensor, {
-          epochs: 10,
-          batchSize: 32,
-          callbacks: tf.node.tensorBoard('logs'),
-        });
-      })
-      .then(() => {
-        const prediction = model.predict(normalizedTextData);
+    model
+      .fit(normalizedTextTensor, labelTensor, { epochs: 10 })
+      .then((history) => {
+        console.log('Model training complete');
 
-        console.log('Prediction:', prediction);
+        // predict
+        const predictions = model.predict(normalizedTextTensor);
+
+        console.log('Example Predictions:');
+        for (let i = 0; i < 5; i++) {
+          const text = textData[i];
+          const label = labelData[i];
+          const prediction =
+            predictions.arraySync()[i][0] > 0.5 ? 'spam' : 'ham';
+          console.log(`Text: ${text}`);
+          console.log(`Label: ${label}`);
+          console.log(`Prediction: ${prediction}`);
+          console.log('-----------------------------');
+        }
+      })
+      .catch((error) => {
+        console.error('Error occurred during model training:', error);
       });
   });
+
+function getLabelCategory(label) {
+  return label === '1' ? 'spam' : 'ham';
+}
