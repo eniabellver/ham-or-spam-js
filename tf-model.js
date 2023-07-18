@@ -4,6 +4,10 @@ const fs = require('fs');
 
 const CSV_FILE_PATH = './files/sms_spam_dataset.csv';
 
+//we set a max to avoid OOM issues
+const MAX_VOCABULARY_SIZE = 5000;
+const MAX_SEQUENCE_LENGTH = 100;
+
 // helper functions
 function tokenizeText(text) {
   return text.toLowerCase().split(/\s+/);
@@ -17,31 +21,31 @@ function createWordIndex(vocabulary) {
   return wordIndex;
 }
 
-function padSequences(sequences, maxLength) {
-  return sequences.map((sequence) => {
-    const padding = Array(maxLength - sequence.length).fill(0);
-    const sequenceWithPadding = sequence.concat(padding);
-    return sequenceWithPadding.map((val) => Number(val));
-  });
-}
-
 function createSequences(tokenizedTextData, wordIndex) {
   return tokenizedTextData.map((tokens) =>
     tokens.map((token) => wordIndex[token] || 0)
   );
 }
 
-function createOneHotEncodedSequences(tokenizedTextData, wordIndex, maxLength) {
+function padSequence(sequence, maxLength) {
+  if (sequence.length >= maxLength) {
+    return sequence.slice(0, maxLength);
+  } else {
+    const padding = Array(maxLength - sequence.length).fill(0);
+    return sequence.concat(padding);
+  }
+}
+
+
+function createOneHotEncodedSequences(tokenizedTextData, wordIndex) {
   return tokenizedTextData.map((tokens) => {
-    const sequence = tokens.map((token) => wordIndex[token] || 0);
-    const indices = tf.tensor1d(sequence, 'int32');
-    const oneHotEncodedSequence = tf.oneHot(indices, Object.keys(wordIndex).length);
-    const paddedSequence = tf.pad(
-      oneHotEncodedSequence,
-      [[0, maxLength - sequence.length], [0, 0]],
-      1
-    );
-    return paddedSequence;
+    const sequence = tokens
+      .map((token) => wordIndex[token] || wordIndex['<UNK>'])
+      .slice(0, MAX_SEQUENCE_LENGTH);
+    const paddedSequence = padSequence(sequence, MAX_SEQUENCE_LENGTH);
+    const indices = tf.tensor1d(paddedSequence, 'int32');
+    const oneHotEncodedSequence = tf.oneHot(indices, MAX_VOCABULARY_SIZE);
+    return oneHotEncodedSequence;
   });
 }
 
@@ -83,28 +87,37 @@ async function trainModel() {
     // prep data
     const numericLabelData = labelData.map((label) => parseInt(label));
     const tokenizedTextData = textData.map(tokenizeText);
-    const vocabularyArray = Array.from(vocabulary).filter(Boolean);
-    const wordIndex = createWordIndex(vocabulary);
+    const vocabularyArray = Array.from(vocabulary)
+      .filter(Boolean)
+      .slice(0, MAX_VOCABULARY_SIZE);
+    vocabularyArray.push('<UNK>');
+    const wordIndex = Object.fromEntries(
+      vocabularyArray.map((word, index) => [word, index])
+    );
     const sequences = createSequences(tokenizedTextData, wordIndex);
-    const maxLength = Math.max(...sequences.map((sequence) => sequence.length));
-    const oneHotEncodedSequences = createOneHotEncodedSequences(
-      tokenizedTextData,
-      wordIndex,
-      maxLength
+    const paddedSequences = sequences.map((sequence) =>
+      padSequence(sequence, MAX_SEQUENCE_LENGTH)
     );
 
+
     // tensors
-    const textTensor = tf.stack(oneHotEncodedSequences);
+    const textTensor = tf.tensor2d(paddedSequences);
     const labelTensor = tf.tensor2d(numericLabelData, [
       numericLabelData.length,
       1,
     ]);
-    const normalizedTextTensor = textTensor.div(tf.scalar(vocabularyArray.length - 1));
+    const normalizedTextTensor = textTensor.div(tf.scalar(MAX_VOCABULARY_SIZE - 1));
 
     // compile
     const model = tf.sequential();
-    model.add(tf.layers.flatten({ inputShape: [maxLength, vocabularyArray.length] }));
-    model.add(tf.layers.dense({ units: 16, activation: 'relu' }));
+    model.add(
+      tf.layers.embedding({
+        inputDim: MAX_VOCABULARY_SIZE,
+        outputDim: 16,
+        inputLength: MAX_SEQUENCE_LENGTH,
+      })
+    );
+    model.add(tf.layers.flatten());
     model.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
     model.compile({
       loss: 'binaryCrossentropy',
@@ -113,12 +126,12 @@ async function trainModel() {
     });
 
     // train
-    await model.fit(normalizedTextTensor, labelTensor, { epochs: 10 })
+    await model.fit(normalizedTextTensor, labelTensor, { epochs: 10 });
 
     // example predictions
-    console.log('Example Predictions:');
-    const predictions = model.predict(normalizedTextTensor);
-    const predictionsData = predictions.array();``
+    console.log('Examples:');
+    const predictions = model.predict(textTensor);
+    const predictionsData = predictions.arraySync();
     for (let i = 0; i < 5; i++) {
       const text = textData[i];
       const label = labelData[i];
@@ -131,7 +144,7 @@ async function trainModel() {
     }
 
     // export
-    return { vocabularyArray, wordIndex, maxLength, model };
+    return { vocabularyArray, wordIndex, model };
 
   } catch (error) {
     console.error('FAILURE - Error occurred during model training:', error);
